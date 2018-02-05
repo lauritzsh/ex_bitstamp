@@ -44,6 +44,10 @@ defmodule ExBitstamp.CurrencyPair do
     %CurrencyPair{from: "ETH", to: "USD"}
   end
 
+  def etheur() do
+    %CurrencyPair{from: "ETH", to: "EUR"}
+  end
+
   def ethbtc() do
     %CurrencyPair{from: "ETH", to: "BTC"}
   end
