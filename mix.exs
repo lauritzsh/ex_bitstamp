@@ -6,10 +6,14 @@ defmodule ExBitstamp.MixProject do
       app: :ex_bitstamp,
       version: "0.1.0",
       elixir: "~> 1.6",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/mocks"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
@@ -24,7 +28,8 @@ defmodule ExBitstamp.MixProject do
     [
       {:httpoison, "~> 1.0"},
       {:poison, "~> 3.1"},
-      {:ex_doc, "~> 0.18.2"}
+      {:ex_doc, "~> 0.18.2"},
+      {:mock, "~> 0.3.1", only: :test}
     ]
   end
 end

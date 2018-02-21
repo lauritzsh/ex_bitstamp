@@ -1,276 +1,632 @@
 defmodule ExBitstamp do
   @moduledoc """
-  TODO Backpressure, <= 600 reqs per 10 min
+  Wraps Bitstamp HTTP API into functions respective of public and private API endpoints.
+
+  The `currency_pair` parameter in functions is expected to be an `ExBitstamp.CurrencyPair` struct. See module
+  documentation for more info on all available convenience functions, but in short, supported currency pairs can
+  be obtained by calling appropriately named functions:
+
+      alias ExBitstamp.CurrencyPair
+
+      ExBitstamp.ticker(CurrencyPair.btcusd())
+
+  API call functions return successful results as a `{:ok, results}` tuple or `{:error, {error_type, reason}`
+  tuple in case of an error. See respective functions' docs for examples of specific return values.
+
+  `ExBitstamp` module uses v2 Bitstamp API endpoints whenever possible.
+
+  Module functions which take an optional `creds` parameter hit Bitstamp's private API which requires valid
+  API credentials for signature generation. By default, if no credentials are provided as an argument ExBitstamp
+  will try to fetch credentials from config. Config should be defined as:
+
+      config :ex_bitstamp,
+        creds: %{
+          customer_id: "customer_id",
+          key: "key",
+          secret: "key"
+        }
+
+  Otherwise, if credentials are provided as an argument, `ExBitstamp.Credentials` struct should be used to
+  pass the credentials to functions.
   """
-  use GenServer
 
-  alias ExBitstamp.{CurrencyPair, Credentials, BankWithdrawal}
-
-  @default_name :bitstamp_client
-  @endpoint "https://www.bitstamp.net/api"
-
-  def start_link(name \\ @default_name, creds \\ nil) do
-    creds =
-      case creds do
-        %Credentials{} ->
-          creds
-
-        _ ->
-          %Credentials{
-            key: Application.get_env(:ex_bitstamp, :creds).key,
-            secret: Application.get_env(:ex_bitstamp, :creds).secret,
-            customer_id: Application.get_env(:ex_bitstamp, :creds).customer_id
-          }
-      end
-
-    GenServer.start_link(__MODULE__, %{creds: creds, name: name}, name: via_tuple(name))
-  end
-
-  def init(state) do
-    {:ok, state}
-  end
-
-  def lookup_client(name \\ @default_name), do: Registry.lookup(Registry.ExBitstamp, name)
-
-  def lookup_client_pid(name \\ @default_name) do
-    case lookup_client(name) do
-      [{pid, _value}] -> pid
-      [] -> nil
-    end
-  end
-
-  def via_tuple(name \\ @default_name), do: {:via, Registry, {Registry.ExBitstamp, name}}
-
-  defp get_pid(pid) when is_pid(pid), do: pid
-
-  defp get_pid(nil), do: lookup_client_pid()
-
-  defp get_pid(name), do: lookup_client_pid(name)
+  alias ExBitstamp.{ApiClient, CurrencyPair, Credentials, BankWithdrawal}
 
   @doc """
   Fetches ticker data for a currency pair.
 
-  Use `pid_or_name` argument to specify a process by PID or name if a Bitstamp Client
-  process was started with a custom name.
+  Example successful response:
 
-  Returns `{:ok, []}` or `{:error, {error_type, reason}` touple as result
+      {:ok,
+       %{
+        "ask" => "7117.11",
+        "bid" => "7100.00",
+        "high" => "7499.00",
+        "last" => "7100.00",
+        "low" => "5920.72",
+        "open" => "6878.65",
+        "timestamp" => "1517927052",
+        "volume" => "71876.22396439",
+        "vwap" => "6707.61"
+      }}
   """
-  def ticker(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "ticker", currency_pair, [], :v2})
+  @spec ticker(CurrencyPair.t()) :: tuple()
+  def ticker(%CurrencyPair{} = currency_pair), do: public("/v2/ticker/#{segment(currency_pair)}/")
 
-  def ticker_hour(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "ticker_hour", currency_pair, [], :v2})
+  @doc """
+  Fetches hourly ticker data for a currency pair.
 
-  def order_book(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "order_book", currency_pair, [], :v2})
+  Example successful response:
 
-  def transactions(%CurrencyPair{} = currency_pair, opts \\ [], pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "transactions", currency_pair, opts, :v2})
+      {:ok,
+        %{
+         "ask" => "6905.42",
+         "bid" => "6900.51",
+         "high" => "7281.80",
+         "last" => "6900.60",
+         "low" => "6784.18",
+         "open" => "7165.04",
+         "timestamp" => "1517927653",
+         "volume" => "4102.91186873",
+         "vwap" => "7076.36"
+        }}
+  """
+  @spec ticker_hour(CurrencyPair.t()) :: tuple()
+  def ticker_hour(%CurrencyPair{} = currency_pair),
+    do: public("/v2/ticker_hour/#{segment(currency_pair)}/")
 
-  def trading_pairs_info(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "trading-pairs-info", [], :v2})
+  @doc """
+  Fetches order book data for a currency pair.
 
-  def eur_usd(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:public, "eur_usd", [], :v1})
+  Example successful response:
 
-  def balance(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "balance", currency_pair, [], :v2})
+      {:ok,
+        %{
+         "asks" => [
+           ["7021.91", "1.11552422"],
+           ["7021.92", "0.00216174"],
+           ["7022.70", ...],
+           [...],
+           ...
+         ],
+         "bids" => [
+           ["6867.88", "20.63509100"],
+           ["6865.74", "2.94040800"],
+           ["6861.31", ...],
+           [...],
+           ...
+         ],
+         "timestamp" => "1517927756"
+        }}
+  """
+  @spec order_book(CurrencyPair.t()) :: tuple()
+  def order_book(%CurrencyPair{} = currency_pair),
+    do: public("/v2/order_book/#{segment(currency_pair)}/")
 
-  def balance_all(), do: GenServer.call(lookup_client_pid(), {:private, "balance", [], :v2})
+  @doc """
+  Fetches transactions data for a currency pair.
 
-  def balance_all(pid_or_name),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "balance", [], :v2})
+  Accepts list of optional parameters as a keyword list. Allowed key is `time` with on of the following values:
+  `"minute"`, `"hour"` (default) or `"day"`. See [Bitstamp API docs](https://www.bitstamp.net/api/#transactions)
+  for more info.
 
-  def user_transactions_all(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "user_transactions", [], :v2})
+  Example successful response:
 
-  def user_transactions(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do:
-      GenServer.call(
-        get_pid(pid_or_name),
-        {:private, "user_transactions", currency_pair, [], :v2}
-      )
+      {:ok,
+      [
+       %{
+         "amount" => "0.51879098",
+         "date" => "1517928659",
+         "price" => "7011.46",
+         "tid" => "52902107",
+         ...
+       },
+       %{
+         "amount" => "0.23897801",
+         "date" => "1517928659",
+         "price" => "7011.45",
+         ...
+       },
+       %{"amount" => "0.01480362", "date" => "1517928659", ...},
+       %{"amount" => "0.04021837", ...},
+       %{...},
+       ...
+      ]}
 
-  def open_orders(%CurrencyPair{} = currency_pair, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "open_orders", currency_pair, [], :v2})
+  """
+  @spec transactions(CurrencyPair.t(), list()) :: tuple()
+  def transactions(%CurrencyPair{} = currency_pair, opts \\ []),
+    do: public("/v2/transactions/#{segment(currency_pair)}/", opts)
 
-  def open_orders_all(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "open_orders/all", [], :v2})
+  @doc """
+  Fetches trading pairs info.
 
-  def order_status(id, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "order_status", [id: id], :v1})
+  Example successful response:
 
-  def cancel_order(id, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "cancel_order", [id: id], :v2})
+      {:ok,
+      [
+       %{
+         "base_decimals" => 8,
+         "counter_decimals" => 2,
+         "description" => "Litecoin / U.S. dollar",
+         "minimum_order" => "5.0 USD",
+         "name" => "LTC/USD",
+         "trading" => "Enabled",
+         "url_symbol" => "ltcusd"
+       },
+       %{
+         "base_decimals" => 8,
+         "counter_decimals" => 2,
+         "description" => "Ether / U.S. dollar",
+         "minimum_order" => "5.0 USD",
+         "name" => "ETH/USD",
+         "trading" => "Enabled",
+         "url_symbol" => "ethusd"
+       },
+       ...
+      ]}
+  """
+  @spec trading_pairs_info() :: tuple()
+  def trading_pairs_info(), do: public("/v2/trading-pairs-info/")
 
-  def cancel_all_orders(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "cancel_all_orders", [], :v1})
+  @doc """
+  Fetches EUR/USD conversion rate.
 
-  def buy(%CurrencyPair{} = currency_pair, amount, price, opts \\ [], pid_or_name \\ nil)
+  Example successful response:
+
+      {:ok, %{"buy" => "1.235", "sell" => "1.235"}}
+  """
+  @spec eur_usd() :: tuple()
+  def eur_usd(), do: public("/eur_usd/")
+
+  @doc """
+  Fetches account balance data for a currency pair.
+
+  Example successful response:
+
+      {:ok,
+      %{
+       "btc_available" => "0.00000000",
+       "btc_balance" => "0.00000000",
+       "btc_reserved" => "0.00000000",
+       "fee" => 0.25,
+       "usd_available" => "0.00",
+       "usd_balance" => "0.00",
+       "usd_reserved" => "0.00"
+      }}
+  """
+  @spec balance(CurrencyPair.t(), Credentials.t() | nil) :: tuple()
+  def balance(%CurrencyPair{} = currency_pair, creds \\ nil),
+    do: private("/v2/balance/#{segment(currency_pair)}/", [], creds)
+
+  @doc """
+  Fetches account balance data for all currencies.
+
+  Example successful response:
+
+      {:ok,
+      %{
+       "xrp_reserved" => "0.00000000",
+       "bcheur_fee" => "0.12",
+       "ltc_balance" => "0.00000000",
+       "ltcbtc_fee" => "0.25",
+       "btc_balance" => "0.00000000",
+       "ltc_reserved" => "0.00000000",
+       "eth_balance" => "0.39706665",
+       "eur_available" => "0.00",
+       "xrpbtc_fee" => "0.25",
+       "bchusd_fee" => "0.12",
+       "bch_available" => "0.00000000",
+       "eurusd_fee" => "0.25",
+       "ethusd_fee" => "0.25",
+       "btc_available" => "0.00000000",
+       "xrpeur_fee" => "0.25",
+       "eur_balance" => "0.00",
+       "btceur_fee" => "0.25",
+       "usd_balance" => "0.00",
+       "bch_balance" => "0.00000000",
+       "xrpusd_fee" => "0.25",
+       "ltcusd_fee" => "0.25",
+       "eth_available" => "0.00000000",
+       "bch_reserved" => "0.00000000",
+       "ltceur_fee" => "0.25",
+       "etheur_fee" => "0.25",
+       "eur_reserved" => "0.00",
+       "ethbtc_fee" => "0.25",
+       "xrp_balance" => "0.00000000",
+       "ltc_available" => "0.00000000",
+       "bchbtc_fee" => "0.12",
+       "eth_reserved" => "0.00000000",
+       "btcusd_fee" => "0.25",
+       "usd_available" => "0.00",
+       "xrp_available" => "0.00000000",
+       "usd_reserved" => "0.00",
+       "btc_reserved" => "0.00000000"
+      }}
+  """
+  @spec balance_all(Credentials.t() | nil) :: tuple()
+  def balance_all(creds \\ nil), do: private("/v2/balance/", [], creds)
+
+  @doc """
+  Fetches user transaction data for all currencies.
+
+  Example successful response:
+
+      {:ok,
+      [
+       %{
+         "btc" => 0.0,
+         "datetime" => "2018-02-02 13:08:20",
+         "eth" => "0.41245141",
+         "eth_eur" => 725.54,
+         "eur" => "-299.25",
+         "fee" => "0.75",
+         "id" => 51366122,
+         "order_id" => 880205621,
+         "type" => "2",
+         "usd" => 0.0
+       },
+       %{
+         "btc" => 0.0,
+         "btc_usd" => "0.00",
+         "datetime" => "2018-02-02 13:00:29",
+         "eur" => "300.00",
+         "fee" => "0.00",
+         "id" => 51351200,
+         "type" => "0",
+         "usd" => 0.0
+       },
+       ....
+      ]}
+
+  """
+  @spec user_transactions_all(Credentials.t() | nil) :: tuple()
+  def user_transactions_all(creds \\ nil), do: private("/v2/user_transactions/", [], creds)
+
+  @doc """
+  Fetches user transaction data for a currency pair.
+
+  Example successful response:
+
+      {:ok,
+      [
+       %{
+         "btc" => 0.0,
+         "datetime" => "2018-02-02 13:08:20",
+         "eth" => "0.41245141",
+         "eth_eur" => 725.54,
+         "eur" => "-299.25",
+         "fee" => "0.75",
+         "id" => 51366122,
+         "order_id" => 880205621,
+         "type" => "2",
+         "usd" => 0.0
+       },
+       %{
+         "btc" => 0.0,
+         "btc_usd" => "0.00",
+         "datetime" => "2018-02-02 13:00:29",
+         "eur" => "300.00",
+         "fee" => "0.00",
+         "id" => 51351200,
+         "type" => "0",
+         "usd" => 0.0
+       },
+       ....
+      ]}
+
+  """
+  @spec user_transactions(CurrencyPair.t(), Credentials.t() | nil) :: tuple()
+  def user_transactions(%CurrencyPair{} = currency_pair, creds \\ nil),
+    do: private("/v2/user_transactions/#{segment(currency_pair)}/", [], creds)
+
+  @doc """
+  Fetches open orders data for a currency pair.
+
+  Example successful response:
+
+      {:ok,
+      [
+       %{
+         "amount" => "0.10000000",
+         "datetime" => "2018-02-13 16:24:00",
+         "id" => "951827494",
+         "price" => "750.00",
+         "type" => "1"
+       }
+      ]}
+  """
+  @spec open_orders(CurrencyPair.t(), Credentials.t() | nil) :: tuple()
+  def open_orders(%CurrencyPair{} = currency_pair, creds \\ nil),
+    do: private("/v2/open_orders/#{segment(currency_pair)}/", [], creds)
+
+  @doc """
+  Fetches open orders data for all currencies.
+
+  Example successful response:
+
+      {:ok,
+      [
+       %{
+         "amount" => "0.10000000",
+         "currency_pair" => "ETH/EUR",
+         "datetime" => "2018-02-13 16:24:00",
+         "id" => "951827494",
+         "price" => "750.00",
+         "type" => "1"
+       }
+      ]}
+  """
+  @spec open_orders_all(Credentials.t() | nil) :: tuple()
+  def open_orders_all(creds \\ nil), do: private("/v2/open_orders/all/", [], creds)
+
+  @doc """
+  Fetches order status.
+
+  Example successful response:
+
+      {:ok, %{"status" => "Open", "transactions" => []}}
+  """
+  @spec order_status(String.t(), Credentials.t() | nil) :: tuple()
+  def order_status(id, creds \\ nil), do: private("/order_status/", [id: id], creds)
+
+  @doc """
+  Cancels an order.
+
+  Example successful response:
+
+      {:ok, %{"amount" => 0.1, "id" => 951827494, "price" => 750.0, "type" => 1}}
+  """
+  @spec cancel_order(String.t(), Credentials.t() | nil) :: tuple()
+  def cancel_order(id, creds \\ nil), do: private("/v2/cancel_order/", [id: id], creds)
+
+  @doc """
+  Cancels all orders.
+
+  Example successful response:
+
+      {:ok, true}
+  """
+  @spec cancel_all_orders(Credentials.t() | nil) :: tuple()
+  def cancel_all_orders(creds \\ nil), do: private("/cancel_all_orders/", [], creds)
+
+  @doc """
+  Places a limit buy order for a currency pair.
+
+  Accepts list of optional parameters as a keyword list. Allowed keys are: `limit_price` or `daily_order`.
+  Only one of these can be present. See [Bitstamp API docs](https://www.bitstamp.net/api/#buy-order)
+  for more info.
+
+  Example successful response:
+
+
+  """
+  @spec buy(CurrencyPair.t(), float(), float(), list() | nil, Credentials.t() | nil) :: tuple()
+  def buy(%CurrencyPair{} = currency_pair, amount, price, opts \\ [], creds \\ nil)
       when is_list(opts),
       do:
-        GenServer.call(
-          get_pid(pid_or_name),
-          {:private, "buy", currency_pair, opts ++ [amount: amount, price: price], :v2}
+        private(
+          "/v2/buy/#{segment(currency_pair)}/",
+          opts ++ [amount: to_string(amount), price: to_string(price)],
+          creds
         )
 
-  def buy_market(%CurrencyPair{} = currency_pair, amount, pid_or_name \\ nil),
-    do:
-      GenServer.call(
-        get_pid(pid_or_name),
-        {:private, "buy/market", currency_pair, [amount: amount], :v2}
-      )
+  @doc """
+  Places a buy market order for a currency pair.
+  """
+  @spec buy_market(CurrencyPair.t(), float(), Credentials.t() | nil) :: tuple()
+  def buy_market(%CurrencyPair{} = currency_pair, amount, creds \\ nil),
+    do: private("/v2/buy/market/#{segment(currency_pair)}/", [amount: to_string(amount)], creds)
 
-  def sell(%CurrencyPair{} = currency_pair, amount, price, opts \\ [], pid_or_name \\ nil)
+  @doc """
+  Places a limit sell order for a currency pair.
+
+  Accepts list of optional parameters as a keyword list. Allowed keys are: `limit_price` or `daily_order`.
+  Only one of these can be present. See [Bitstamp API docs](https://www.bitstamp.net/api/#sell-order)
+  for more info.
+  """
+  @spec sell(CurrencyPair.t(), float(), float(), list() | nil, Credentials.t() | nil) :: tuple()
+  def sell(%CurrencyPair{} = currency_pair, amount, price, opts \\ [], creds \\ nil)
       when is_list(opts),
       do:
-        GenServer.call(
-          get_pid(pid_or_name),
-          {:private, "sell", currency_pair, [amount: amount, price: price], :v2}
+        private(
+          "/v2/sell/#{segment(currency_pair)}/",
+          opts ++ [amount: to_string(amount), price: to_string(price)],
+          creds
         )
 
-  def sell_market(%CurrencyPair{} = currency_pair, amount, pid_or_name \\ nil),
-    do:
-      GenServer.call(
-        get_pid(pid_or_name),
-        {:private, "sell/market", currency_pair, [amount: amount]}
-      )
+  @doc """
+  Places a sell market order for a currency pair.
+  """
+  @spec sell_market(CurrencyPair.t(), float(), Credentials.t() | nil) :: tuple()
+  def sell_market(%CurrencyPair{} = currency_pair, amount, creds \\ nil),
+    do: private("/v2/sell/market/#{segment(currency_pair)}/", [amount: to_string(amount)], creds)
 
-  def withdrawal_requests(opts \\ [], pid_or_name \\ nil) when is_list(opts),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "withdrawal_requests", opts})
+  @doc """
+  Fetches all withdrawal requests.
+  """
+  @spec withdrawal_requests(list(), Credentials.t() | nil) :: tuple()
+  def withdrawal_requests(opts \\ [], creds \\ nil) when is_list(opts),
+    do: private("/v2/withdrawal-requests/", opts, creds)
 
-  def withdrawal_btc(amount, address, instant, pid_or_name \\ nil),
-    do:
-      coin_withdrawal(pid_or_name, "bitcoin_withdrawal", amount, address, [instant: instant], :v1)
+  @doc """
+  Executes bitcoin withdrawal.
+  """
+  @spec withdrawal_btc(float(), String.t(), boolean(), Credentials.t() | nil) :: tuple()
+  def withdrawal_btc(amount, address, instant, creds \\ nil) do
+    instant =
+      case instant do
+        true -> 1
+        false -> 0
+      end
 
-  def withdrawal_ltc(amount, address, pid_or_name \\ nil),
-    do: coin_withdrawal(pid_or_name, "ltc_withdrawal", amount, address)
+    coin_withdrawal(creds, "bitcoin_withdrawal", amount, address, [instant: instant], :v1)
+  end
 
-  def withdrawal_eth(amount, address, pid_or_name \\ nil),
-    do: coin_withdrawal(pid_or_name, "eth_withdrawal", amount, address)
+  @doc """
+  Executes litecoin withdrawal.
+  """
+  @spec withdrawal_ltc(float(), String.t(), Credentials.t() | nil) :: tuple()
+  def withdrawal_ltc(amount, address, creds \\ nil),
+    do: coin_withdrawal(creds, "ltc_withdrawal", amount, address)
 
-  def withdrawal_xrp(amount, address, destination_tag \\ nil, pid_or_name \\ nil) do
+  @doc """
+  Executes ethereum withdrawal.
+  """
+  @spec withdrawal_eth(float(), String.t(), Credentials.t() | nil) :: tuple()
+  def withdrawal_eth(amount, address, creds \\ nil),
+    do: coin_withdrawal(creds, "eth_withdrawal", amount, address)
+
+  @doc """
+  Executes ripple withdrawal.
+  """
+  @spec withdrawal_xrp(float(), String.t(), String.t() | nil, Credentials.t() | nil) :: tuple()
+  def withdrawal_xrp(amount, address, destination_tag \\ nil, creds \\ nil) do
     opts =
       case destination_tag do
         nil -> []
         tag -> [destination_tag: tag]
       end
 
-    coin_withdrawal(pid_or_name, "xrp_withdrawal", amount, address, opts)
+    coin_withdrawal(creds, "xrp_withdrawal", amount, address, opts)
   end
 
-  def withdrawal_bch(amount, address, pid_or_name \\ nil),
-    do: coin_withdrawal(pid_or_name, "bch_withdrawal", amount, address)
+  @doc """
+  Executes bitcoin cash withdrawal.
+  """
+  @spec withdrawal_bch(float(), String.t(), Credentials.t() | nil) :: tuple()
+  def withdrawal_bch(amount, address, creds \\ nil),
+    do: coin_withdrawal(creds, "bch_withdrawal", amount, address)
 
-  def withdrawal_ripple(amount, address, currency, pid_or_name \\ nil),
+  @doc """
+  Executes ripple withdrawal using v1 API.
+  """
+  @spec withdrawal_ripple(float(), String.t(), String.t(), Credentials.t() | nil) :: tuple()
+  def withdrawal_ripple(amount, address, currency, creds \\ nil),
+    do: coin_withdrawal(creds, "ripple_withdrawal", amount, address, [currency: currency], :v1)
+
+  defp coin_withdrawal(creds, endpoint, amount, address, opts \\ [], version \\ :v2),
     do:
-      coin_withdrawal(
-        pid_or_name,
-        "ripple_withdrawal",
-        amount,
-        address,
-        [currency: currency],
-        :v1
+      private(
+        "/#{version(version)}#{endpoint}/",
+        opts ++ [amount: to_string(amount), address: address],
+        creds
       )
 
-  defp coin_withdrawal(pid_or_name, endpoint, amount, address, opts \\ [], version \\ :v2),
-    do:
-      GenServer.call(
-        get_pid(pid_or_name),
-        {:private, endpoint, opts ++ [amount: amount, address: address], version}
-      )
+  @doc """
+  Retrieves bitcoin deposit address.
+  """
+  @spec deposit_address_btc(Credentials.t() | nil) :: tuple()
+  def deposit_address_btc(creds \\ nil),
+    do: coin_deposit_address(creds, "bitcoin_deposit_address", :v1)
 
-  def deposit_address_btc(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "bitcoin_deposit_address", :v1)
+  @doc """
+  Retrieves litecoin deposit address.
+  """
+  @spec deposit_address_ltc(Credentials.t() | nil) :: tuple()
+  def deposit_address_ltc(creds \\ nil), do: coin_deposit_address(creds, "ltc_address")
 
-  def deposit_address_ltc(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "ltc_address")
+  @doc """
+  Retrieves ethereum deposit address.
+  """
+  @spec deposit_address_eth(Credentials.t() | nil) :: tuple()
+  def deposit_address_eth(creds \\ nil), do: coin_deposit_address(creds, "eth_address")
 
-  def deposit_address_eth(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "eth_address")
+  @doc """
+  Retrieves xrp deposit address.
+  """
+  @spec deposit_address_xrp(Credentials.t() | nil) :: tuple()
+  def deposit_address_xrp(creds \\ nil), do: coin_deposit_address(creds, "xrp_address")
 
-  def deposit_address_xrp(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "xrp_address")
+  @doc """
+  Retrieves bitcoin cash deposit address.
+  """
+  @spec deposit_address_bch(Credentials.t() | nil) :: tuple()
+  def deposit_address_bch(creds \\ nil), do: coin_deposit_address(creds, "bch_address")
 
-  def deposit_address_bch(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "bch_address")
+  @doc """
+  Retrieves ripple deposit address using v1 API.
+  """
+  @spec deposit_address_ripple(Credentials.t() | nil) :: tuple()
+  def deposit_address_ripple(creds \\ nil), do: coin_deposit_address(creds, "ripple_address", :v1)
 
-  def deposit_address_ripple(pid_or_name \\ nil),
-    do: coin_deposit_address(pid_or_name, "ripple_address", :v1)
+  defp coin_deposit_address(creds, endpoint, version \\ :v2),
+    do: private("/#{version(version)}#{endpoint}/", [], creds)
 
-  defp coin_deposit_address(pid_or_name, endpoint, version \\ :v2),
-    do: GenServer.call(get_pid(pid_or_name), {:private, endpoint, [], version})
+  @spec unconfirmed_btc(Credentials.t() | nil) :: tuple()
+  def unconfirmed_btc(creds \\ nil), do: private("/unconfirmed_btc/", [], creds)
 
-  def unconfirmed_btc(pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "unconfirmed_btc", [], :v1})
-
-  def transfer_to_main(amount, currency, sub_account_id \\ nil, pid_or_name \\ nil) do
+  @doc """
+  Executes a transfer of funds from sub account to main account.
+  """
+  @spec transfer_to_main(float(), String.t(), any(), Credentials.t() | nil) :: tuple()
+  def transfer_to_main(amount, currency, sub_account_id \\ nil, creds \\ nil) do
     opts =
       case sub_account_id do
         nil -> [amount: amount, currency: currency]
-        sub_account_id -> [amount: amount, currency: currency, subAccount: sub_account_id]
+        sub_account_id -> [amount: to_string(amount), currency: currency, subAccount: sub_account_id]
       end
 
-    GenServer.call(get_pid(pid_or_name), {:private, "transfer-to-main", opts, :v1})
+    private("/transfer-to-main/", opts, creds)
   end
 
-  def transfer_from_main(amount, currency, sub_account_id, pid_or_name \\ nil) do
-    opts = [amount: amount, currency: currency, subAccount: sub_account_id]
+  @doc """
+  Executes a transfer of funds from main account to sub account.
+  """
+  @spec transfer_from_main(float(), String.t(), Credentials.t() | nil) :: tuple()
+  def transfer_from_main(amount, currency, sub_account_id, creds \\ nil) do
+    opts = [amount: to_string(amount), currency: currency, subAccount: sub_account_id]
 
-    GenServer.call(get_pid(pid_or_name), {:private, "transfer-from-main", opts, :v1})
+    private("/transfer-from-main/", opts, creds)
   end
 
-  def open_bank_withdrawal(%BankWithdrawal{} = bank_withdrawal, pid_or_name \\ nil),
-    do:
-      GenServer.call(
-        get_pid(pid_or_name),
-        {:private, "withdrawal/open", Map.to_list(bank_withdrawal)}
-      )
+  @doc """
+  Executes a bank withdrawal.
+  """
+  @spec open_bank_withdrawal(BankWithdrawal.t(), Credentials.t() | nil) :: tuple()
+  def open_bank_withdrawal(%BankWithdrawal{} = bank_withdrawal, creds \\ nil),
+    do: private("/v2/withdrawal/open/", Map.to_list(bank_withdrawal), creds)
 
-  def bank_withdrawal_status(id, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "withdrawal/status", [id: id], :v2})
+  @doc """
+  Retrieves bank withdrawal status.
+  """
+  @spec bank_withdrawal_status(String.t(), Credentials.t() | nil) :: tuple()
+  def bank_withdrawal_status(id, creds \\ nil),
+    do: private("/v2/withdrawal/status/", [id: id], creds)
 
-  def cancel_bank_withdrawal(id, pid_or_name \\ nil),
-    do: GenServer.call(get_pid(pid_or_name), {:private, "withdrawal/cancel", [id: id], :v2})
+  @doc """
+  Cancels bank withdrawal status.
+  """
+  @spec cancel_bank_withdrawal(String.t(), Credentials.t() | nil) :: tuple()
+  def cancel_bank_withdrawal(id, creds \\ nil),
+    do: private("/v2/withdrawal/cancel/", [id: id], creds)
 
-  def new_liquidation_address(liquidation_currency, pid_or_name \\ nil) do
+  @doc """
+  Creates new liquidation address.
+  """
+  @spec new_liquidation_address(String.t(), Credentials.t() | nil) :: tuple()
+  def new_liquidation_address(liquidation_currency, creds \\ nil) do
     opts = [liquidation_currency: liquidation_currency]
 
-    GenServer.call(get_pid(pid_or_name), {:private, "liquidation_address/new", opts, :v2})
+    private("/v2/liquidation_address/new/", opts, creds)
   end
 
-  def liquidation_address_info(address \\ nil, pid_or_name \\ nil) do
+  @doc """
+  Retireves transactions for liquidation address.
+  """
+  @spec liquidation_address_info(String.t() | nil, Credentials.t() | nil) :: tuple()
+  def liquidation_address_info(address \\ nil, creds \\ nil) do
     opts =
       case address do
         nil -> []
         address -> [address: address]
       end
 
-    GenServer.call(get_pid(pid_or_name), {:private, "liquidation_address/info", opts, :v2})
+    private("/v2/liquidation_address/info/", opts, creds)
   end
 
-  def handle_call({:public, endpoint, opts, version}, _, state),
-    do: {:reply, get("#{version(version)}#{endpoint}/", [], params: opts), state}
-
-  def handle_call({:public, endpoint, %CurrencyPair{from: from, to: to}, opts, version}, _, state) do
-    uri = "#{version(version)}/#{endpoint}/#{currency_pair_segment(from, to)}/"
-    {:reply, get(uri, [], params: opts), state}
-  end
-
-  def handle_call({:private, endpoint, opts, version}, _, %{creds: creds} = state),
-    do: {:reply, post("#{version(version)}#{endpoint}/", opts ++ signature(creds)), state}
-
-  def handle_call(
-        {:private, endpoint, %CurrencyPair{from: from, to: to}, opts, version},
-        _,
-        %{creds: creds} = state
-      ) do
-    uri = "#{version(version)}#{endpoint}/#{currency_pair_segment(from, to)}/"
-    {:reply, post(uri, opts ++ signature(creds)), state}
-  end
-
-  defp get(uri, headers, options) do
-    case HTTPoison.get("#{@endpoint}/#{uri}", headers, options) do
+  defp public(uri, data \\ []) do
+    case ApiClient.get(uri, [], data) do
       {:error, reason} ->
         {:error, {:http_error, reason}}
 
@@ -283,8 +639,21 @@ defmodule ExBitstamp do
     end
   end
 
-  defp post(uri, data) do
-    case HTTPoison.post("#{@endpoint}/#{uri}", {:form, data}) do
+  defp private(uri, data, creds) do
+    creds =
+      case creds do
+        creds = %Credentials{} ->
+          creds
+
+        _ ->
+          %Credentials{
+            key: Application.get_env(:ex_bitstamp, :creds).key,
+            secret: Application.get_env(:ex_bitstamp, :creds).secret,
+            customer_id: Application.get_env(:ex_bitstamp, :creds).customer_id
+          }
+      end
+
+    case ApiClient.post(uri, {:form, data ++ signature(creds)}) do
       {:error, reason} ->
         {:error, {:http_error, reason}}
 
@@ -314,5 +683,5 @@ defmodule ExBitstamp do
 
   defp version(:v2), do: "v2/"
 
-  defp currency_pair_segment(from, to), do: String.downcase(from <> to)
+  defp segment(%CurrencyPair{from: from, to: to}), do: String.downcase(from <> to)
 end

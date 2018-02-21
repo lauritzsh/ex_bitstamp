@@ -1,5 +1,11 @@
 defmodule ExBitstamp.CurrencyPair do
+  @moduledoc """
+  Provides a struct for currency pairs and convenience functions for pairs supported by Bitstamp API.
+  """
+
   alias __MODULE__
+
+  @type t :: %CurrencyPair{from: String.t(), to: String.t()}
 
   @enforce_keys [:from, :to]
   defstruct [:from, :to]
