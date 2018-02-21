@@ -1,5 +1,7 @@
 # ExBitstamp
 
+[![Build Status](https://api.travis-ci.org/mvrkljan/ex_bitstamp.svg?branch=master)](https://travis-ci.org/mvrkljan/ex_bitstamp) [![Hex Version](http://img.shields.io/hexpm/v/ex_bitstamp.svg?style=flat)](https://hex.pm/packages/ex_bitstamp) [![Hex docs](http://img.shields.io/badge/hex.pm-docs-green.svg?style=flat)](https://hexdocs.pm/ex_bitstamp) [![Ebert](https://ebertapp.io/github/mvrkljan/ex_bitstamp.svg)](https://ebertapp.io/github/mvrkljan/ex_bitstamp)
+
 Elixir client library for Bitstamp HTTP API.
 
 ## Installation
