@@ -5,10 +5,23 @@ defmodule ExBitstamp.MixProject do
     [
       app: :ex_bitstamp,
       version: "0.1.0",
+      description: "Elixir client library for Bitstamp HTTP API",
       elixir: "~> 1.6",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      name: "ExBitstamp",
+      source_url: "https://github.com/mvrkljan/ex_bitstamp",
+      docs: [
+        main: "ExBitstamp"
+        # logo: "path/to/logo.png"
+      ],
+      package: [
+        licenses: ["MIT"],
+        files: ["lib", "mix.exs", "README*"],
+        maintainers: ["Martin Vrkljan"],
+        links: %{"GitHub" => "https://github.com/mvrkljan/ex_bitstamp"}
+      ]
     ]
   end
 
