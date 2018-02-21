@@ -7,11 +7,9 @@ defmodule ExBitstamp.Application do
 
   def start(_type, _args) do
     # List all child processes to be supervised
-    # TODO Pass in credentials here, so application can be started per user
     children = [
       # Starts a worker by calling: ExBitstamp.Worker.start_link(arg)
-      # {ExBitstamp.Worker, arg},
-      {Registry, keys: :unique, name: Registry.ExBitstamp}
+      # {ExBitstamp.Worker, arg}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
