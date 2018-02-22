@@ -57,8 +57,8 @@ If you discover any security related issues, please email mvrkljan@gmail.com ins
 
 ## Credits
 
-- [Martin Vrkljan][link-author]
-- [All Contributors][link-contributors]
+- [Martin Vrkljan](https://github.com/mvrkljan)
+- [All Contributors](https://github.com/mvrkljan/ex_bitstamp/graphs/contributors)
 
 ## License
 
