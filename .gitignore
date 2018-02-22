@@ -24,3 +24,5 @@ ex_bitstamp-*.tar
 
 .idea/
 
+*.secret.exs
+

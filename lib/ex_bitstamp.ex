@@ -396,10 +396,6 @@ defmodule ExBitstamp do
   Accepts list of optional parameters as a keyword list. Allowed keys are: `limit_price` or `daily_order`.
   Only one of these can be present. See [Bitstamp API docs](https://www.bitstamp.net/api/#buy-order)
   for more info.
-
-  Example successful response:
-
-
   """
   @spec buy(CurrencyPair.t(), float(), float(), list() | nil, Credentials.t() | nil) :: tuple()
   def buy(%CurrencyPair{} = currency_pair, amount, price, opts \\ [], creds \\ nil)
@@ -553,6 +549,9 @@ defmodule ExBitstamp do
   defp coin_deposit_address(creds, endpoint, version \\ :v2),
     do: private("/#{version(version)}#{endpoint}/", [], creds)
 
+  @doc """
+  Retrieves unconfirmed BTC data.
+  """
   @spec unconfirmed_btc(Credentials.t() | nil) :: tuple()
   def unconfirmed_btc(creds \\ nil), do: private("/unconfirmed_btc/", [], creds)
 
@@ -563,8 +562,11 @@ defmodule ExBitstamp do
   def transfer_to_main(amount, currency, sub_account_id \\ nil, creds \\ nil) do
     opts =
       case sub_account_id do
-        nil -> [amount: amount, currency: currency]
-        sub_account_id -> [amount: to_string(amount), currency: currency, subAccount: sub_account_id]
+        nil ->
+          [amount: amount, currency: currency]
+
+        sub_account_id ->
+          [amount: to_string(amount), currency: currency, subAccount: sub_account_id]
       end
 
     private("/transfer-to-main/", opts, creds)
