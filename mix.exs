@@ -40,6 +40,7 @@ defmodule ExBitstamp.MixProject do
   defp deps do
     [
       {:httpoison, "~> 1.0"},
+      {:websockex, "~> 0.4.0"},
       {:poison, "~> 3.1"},
       {:ex_doc, "~> 0.18.2"},
       {:mock, "~> 0.3.1", only: :test}

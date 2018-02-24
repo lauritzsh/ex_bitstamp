@@ -1,4 +1,4 @@
-defmodule ExBitstamp.ApiClient do
+defmodule ExBitstamp.HttpApiClient do
   @moduledoc false
   use HTTPoison.Base
 

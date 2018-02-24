@@ -30,7 +30,7 @@ defmodule ExBitstamp do
   pass the credentials to functions.
   """
 
-  alias ExBitstamp.{ApiClient, CurrencyPair, Credentials, BankWithdrawal}
+  alias ExBitstamp.{BankWithdrawal, CurrencyPair, Credentials, HttpApiClient, WebsocketApiClient}
 
   @doc """
   Fetches ticker data for a currency pair.
@@ -627,8 +627,24 @@ defmodule ExBitstamp do
     private("/v2/liquidation_address/info/", opts, creds)
   end
 
+  def live_ticker(%CurrencyPair{} = currency_pair, fun) when is_function(fun, 1) do
+    WebsocketApiClient.register("live_trades_#{segment(currency_pair)}", fun)
+  end
+
+  def live_order_book(%CurrencyPair{} = currency_pair, fun) when is_function(fun, 1) do
+    WebsocketApiClient.register("order_book_#{segment(currency_pair)}", fun)
+  end
+
+  def live_full_order_book(%CurrencyPair{} = currency_pair, fun) when is_function(fun, 1) do
+    WebsocketApiClient.register("diff_order_book_#{segment(currency_pair)}", fun)
+  end
+
+  def live_orders(%CurrencyPair{} = currency_pair, fun) when is_function(fun, 1) do
+    WebsocketApiClient.register("live_orders_#{segment(currency_pair)}", fun)
+  end
+
   defp public(uri, data \\ []) do
-    case ApiClient.get(uri, [], data) do
+    case HttpApiClient.get(uri, [], data) do
       {:error, reason} ->
         {:error, {:http_error, reason}}
 
@@ -655,7 +671,7 @@ defmodule ExBitstamp do
           }
       end
 
-    case ApiClient.post(uri, {:form, data ++ signature(creds)}) do
+    case HttpApiClient.post(uri, {:form, data ++ signature(creds)}) do
       {:error, reason} ->
         {:error, {:http_error, reason}}
 
