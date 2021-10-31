@@ -679,7 +679,7 @@ defmodule ExBitstamp do
     [key: key, nonce: nonce, signature: signature]
   end
 
-  defp encrypt_hmac_sha256(message, key), do: :crypto.hmac(:sha256, key, message)
+  defp encrypt_hmac_sha256(message, key), do: :crypto.mac(:hmac, :sha256, key, message)
 
   defp version(:v1), do: ""
 
